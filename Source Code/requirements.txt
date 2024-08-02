@@ -1,4 +1,0 @@
-argparse
-pathlib
-termcolor
-prettytable
