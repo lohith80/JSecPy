@@ -1,0 +1,42 @@
+{
+  "Broken Access Control": {
+      "rank": 1,
+      "risk_level": "critical"
+  },
+  "Cryptographic Failures": {
+      "rank": 2,
+      "risk_level": "high"
+  },
+  "Injection": {
+      "rank": 3,
+      "risk_level": "critical"
+  },
+  "Insecure Design": {
+      "rank": 4,
+      "risk_level": "high"
+  },
+  "Security Misconfiguration": {
+      "rank": 5,
+      "risk_level": "medium"
+  },
+  "Vulnerable and Outdated Components": {
+      "rank": 6,
+      "risk_level": "high"
+  },
+  "Identification & Authentication Failures": {
+      "rank": 7,
+      "risk_level": "high"
+  },
+  "Software and data Integrity Failures": {
+      "rank": 8,
+      "risk_level": "medium"
+  },
+  "Security Logging and Monitoring Failures": {
+      "rank": 9,
+      "risk_level": "medium"
+  },
+  "Server-Side Request Forgery": {
+      "rank": 10,
+      "risk_level": "medium"
+  }
+}
