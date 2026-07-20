@@ -1,0 +1,305 @@
+{
+  "cases": [
+    {
+      "filename": "UserLookupServlet.java",
+      "java": "import java.sql.Connection;\nimport java.sql.Statement;\nimport java.sql.ResultSet;\nimport javax.servlet.http.HttpServletRequest;\n\npublic class UserLookupServlet {\n    public ResultSet lookup(HttpServletRequest request, Connection conn) throws Exception {\n        String tenant = request.getHeader(\"X-Tenant-Id\");\n        String id = tenant;\n        String query = \"SELECT * FROM users WHERE tenant = '\" + id + \"'\";\n        Statement stmt = conn.createStatement();\n        return stmt.executeQuery(query);\n    }\n}\n",
+      "expect": "detect",
+      "rule_id": "JSEC-SQLI",
+      "rationale": "getHeader is a source; taint flows tenant -> id (assignment) -> query (string concat) -> executeQuery, all intra-procedural, so the engine should flag it."
+    },
+    {
+      "filename": "PingController.java",
+      "java": "import javax.servlet.http.HttpServletRequest;\n\npublic class PingController {\n    public void ping(HttpServletRequest request) throws Exception {\n        String host = request.getParameter(\"host\");\n        String target = (host != null) ? host : \"localhost\";\n        Runtime.getRuntime().exec(\"ping -c 1 \" + target);\n    }\n}\n",
+      "expect": "detect",
+      "rule_id": "JSEC-CMDI",
+      "rationale": "getParameter taint reaches target through a ternary whose then-branch is the tainted host, then concatenates into Runtime.exec, which the documented model should still catch."
+    },
+    {
+      "filename": "DirectorySearch.java",
+      "java": "import javax.naming.directory.DirContext;\nimport javax.naming.directory.SearchControls;\nimport javax.servlet.http.HttpServletRequest;\n\npublic class DirectorySearch {\n    public void find(HttpServletRequest request, DirContext ctx) throws Exception {\n        String user = request.getParameter(\"uid\");\n        String normalized = user.trim().toLowerCase();\n        String filter = \"(uid=\" + normalized + \")\";\n        ctx.search(\"ou=people,dc=example,dc=com\", filter, new SearchControls());\n    }\n}\n",
+      "expect": "detect",
+      "rule_id": "JSEC-LDAP",
+      "rationale": "trim() and toLowerCase() are pass-through string ops that preserve taint, so the LDAP filter passed to DirContext.search stays tainted and should be flagged."
+    },
+    {
+      "filename": "XmlUserQuery.java",
+      "java": "import javax.xml.xpath.XPath;\nimport javax.xml.xpath.XPathFactory;\nimport javax.xml.xpath.XPathConstants;\nimport org.w3c.dom.Document;\nimport javax.servlet.http.HttpServletRequest;\n\npublic class XmlUserQuery {\n    public Object query(HttpServletRequest request, Document doc) throws Exception {\n        String username = request.getParameter(\"username\");\n        String expr = String.format(\"/users/user[@name='%s']/role\", username);\n        XPath xpath = XPathFactory.newInstance().newXPath();\n        return xpath.evaluate(expr, doc, XPathConstants.STRING);\n    }\n}\n",
+      "expect": "detect",
+      "rule_id": "JSEC-XPATH",
+      "rationale": "String.format is a listed pass-through op so the tainted username propagates into expr and reaches XPath.evaluate(arg0), which the model treats as a sink."
+    },
+    {
+      "filename": "ReportBuilder.java",
+      "java": "import java.sql.Connection;\nimport java.sql.PreparedStatement;\nimport java.io.BufferedReader;\n\npublic class ReportBuilder {\n    public PreparedStatement build(Connection conn, BufferedReader reader) throws Exception {\n        String order = reader.readLine();\n        String sql = new StringBuilder()\n            .append(\"SELECT id, total FROM orders ORDER BY \")\n            .append(order)\n            .toString();\n        return conn.prepareStatement(sql);\n    }\n}\n",
+      "expect": "detect",
+      "rule_id": "JSEC-SQLI",
+      "rationale": "BufferedReader.readLine is a source; the StringBuilder member chain has a tainted append(order) arg, so toString() yields tainted sql passed to prepareStatement(arg0) \u2014 caught per the documented append-member rule."
+    },
+    {
+      "filename": "CommandDispatcher.java",
+      "java": "import java.util.Map;\nimport java.util.HashMap;\nimport javax.servlet.http.HttpServletRequest;\n\npublic class CommandDispatcher {\n    public void dispatch(HttpServletRequest request) throws Exception {\n        Map<String, String> params = new HashMap<>();\n        params.put(\"cmd\", request.getParameter(\"cmd\"));\n        String command = params.get(\"cmd\");\n        ProcessBuilder pb = new ProcessBuilder(\"bash\", \"-c\", command);\n        pb.start();\n    }\n}\n",
+      "expect": "known-gap",
+      "rule_id": "JSEC-CMDI",
+      "rationale": "Taint is stored into a Map via put and re-read via get; the documented model does not track taint through collections/maps, so the ProcessBuilder sink is a genuine miss."
+    },
+    {
+      "filename": "ProductDao.java",
+      "java": "import org.hibernate.Session;\nimport org.hibernate.query.Query;\n\npublic class ProductDao {\n    public Query loadByCategory(Session session) {\n        String category = System.getProperty(\"default.category\");\n        String hql = \"FROM Product p WHERE p.category = '\" + category + \"'\";\n        return session.createQuery(hql);\n    }\n}\n",
+      "expect": "detect",
+      "rule_id": "JSEC-SQLI",
+      "rationale": "System.getProperty is a source; taint concatenates into hql and flows to Hibernate createQuery, a documented SQLI sink, all within one method."
+    },
+    {
+      "filename": "FileDownloadServlet.java",
+      "java": "import java.io.File;\nimport java.io.FileInputStream;\nimport java.io.IOException;\nimport javax.servlet.http.HttpServletRequest;\nimport javax.servlet.http.HttpServletResponse;\n\npublic class FileDownloadServlet {\n    private static final String BASE_DIR = \"/var/www/reports/\";\n\n    public void download(HttpServletRequest request, HttpServletResponse response) throws IOException {\n        String requested = request.getParameter(\"file\");\n        String normalized = requested.replace(\"\\\\\", \"/\");\n        String target = BASE_DIR + normalized;\n        File document = new File(target);\n        FileInputStream in = new FileInputStream(document);\n        byte[] buffer = new byte[4096];\n        in.read(buffer);\n        in.close();\n    }\n}\n",
+      "expect": "detect",
+      "rule_id": "JSEC-PATH",
+      "rationale": "getParameter taint survives replace() (a pass-through, not a sanitizer) and '+' concat into new File(), a documented path sink, so intra-procedural taint should fire."
+    },
+    {
+      "filename": "TemplateLoader.java",
+      "java": "import java.nio.file.Files;\nimport java.nio.file.Path;\nimport java.nio.file.Paths;\nimport java.io.IOException;\nimport javax.servlet.http.HttpServletRequest;\n\npublic class TemplateLoader {\n    public byte[] load(HttpServletRequest request) throws IOException {\n        String raw = request.getHeader(\"X-Template-Path\");\n        String trimmed = raw.trim();\n        String relative = trimmed.substring(trimmed.indexOf(':') + 1);\n        Path resolved = Paths.get(\"/opt/app/templates\", relative);\n        return Files.readAllBytes(resolved);\n    }\n}\n",
+      "expect": "detect",
+      "rule_id": "JSEC-PATH",
+      "rationale": "getHeader taint propagates through trim() and substring() (both listed pass-throughs) into Paths.get and Files.readAllBytes, which are documented path sinks."
+    },
+    {
+      "filename": "WebhookForwarder.java",
+      "java": "import java.net.URL;\nimport java.net.URLConnection;\nimport java.io.IOException;\nimport javax.servlet.http.HttpServletRequest;\n\npublic class WebhookForwarder {\n    public void forward(HttpServletRequest request) throws IOException {\n        String host = request.getParameter(\"callback_host\");\n        String endpoint = \"http://\" + host + \"/notify\";\n        URL target = new URL(endpoint);\n        URLConnection connection = target.openConnection();\n        connection.connect();\n    }\n}\n",
+      "expect": "detect",
+      "rule_id": "JSEC-SSRF",
+      "rationale": "getParameter taint reaches new URL() and openConnection() through a simple '+' concatenation chain, both documented SSRF sinks under the intra-procedural model."
+    },
+    {
+      "filename": "ProfileFetcher.java",
+      "java": "import org.springframework.web.client.RestTemplate;\nimport javax.servlet.http.HttpServletRequest;\n\npublic class ProfileFetcher {\n    private final RestTemplate restTemplate = new RestTemplate();\n\n    public String fetch(HttpServletRequest request) {\n        String forwardedHost = request.getHeader(\"X-Forwarded-Host\");\n        String normalizedHost = forwardedHost.toLowerCase();\n        String url = \"https://\" + normalizedHost + \"/api/profile\";\n        String body = restTemplate.getForObject(url, String.class);\n        return body;\n    }\n}\n",
+      "expect": "detect",
+      "rule_id": "JSEC-SSRF",
+      "rationale": "getHeader taint survives toLowerCase() and concat, flowing into RestTemplate.getForObject, a documented SSRF sink; classic Host-header SSRF that stays fully intra-procedural."
+    },
+    {
+      "filename": "ImageProxy.java",
+      "java": "import java.io.BufferedReader;\nimport java.io.IOException;\nimport java.io.InputStreamReader;\nimport java.net.URL;\nimport java.net.URLConnection;\nimport javax.servlet.http.HttpServletRequest;\n\npublic class ImageProxy {\n    public void proxy(HttpServletRequest request) throws IOException {\n        BufferedReader reader = new BufferedReader(new InputStreamReader(request.getInputStream()));\n        String remoteUrl = reader.readLine();\n        String finalUrl = remoteUrl.trim();\n        URL image = new URL(finalUrl);\n        URLConnection connection = image.openConnection();\n        connection.getInputStream();\n    }\n}\n",
+      "expect": "detect",
+      "rule_id": "JSEC-SSRF",
+      "rationale": "BufferedReader.readLine() is a documented source; its taint flows through trim() into new URL().openConnection(), so the request-body-driven SSRF should be caught intra-procedurally."
+    },
+    {
+      "filename": "ConfigService.java",
+      "java": "import java.io.File;\nimport java.io.FileReader;\nimport java.io.IOException;\nimport javax.servlet.http.HttpServletRequest;\n\npublic class ConfigService {\n    public String read(HttpServletRequest request) throws IOException {\n        String name = request.getParameter(\"config\");\n        return openConfig(name);\n    }\n\n    private String openConfig(String path) throws IOException {\n        File file = new File(\"/etc/app/\" + path);\n        FileReader reader = new FileReader(file);\n        char[] buffer = new char[256];\n        reader.read(buffer);\n        reader.close();\n        return new String(buffer);\n    }\n}\n",
+      "expect": "known-gap",
+      "rule_id": "JSEC-PATH",
+      "rationale": "The tainted getParameter value is passed as an argument to a separate method where the new File sink lives, and the documented model is intra-procedural only, so this cross-method flow is a genuine miss."
+    },
+    {
+      "filename": "RedirectValidator.java",
+      "java": "import java.net.URL;\nimport java.net.URLConnection;\nimport java.io.IOException;\nimport javax.servlet.http.HttpServletRequest;\n\npublic class RedirectValidator {\n    private String nextUrl;\n\n    public void capture(HttpServletRequest request) {\n        this.nextUrl = request.getParameter(\"next\");\n    }\n\n    public void validateTarget() throws IOException {\n        URL url = new URL(this.nextUrl);\n        URLConnection connection = url.openConnection();\n        connection.connect();\n    }\n}\n",
+      "expect": "known-gap",
+      "rule_id": "JSEC-SSRF",
+      "rationale": "The open-redirect 'next' parameter is stored in a field in one method and read into the new URL sink in another, hitting both the field-storage and cross-method limitations, so it is an honest false negative."
+    },
+    {
+      "filename": "Md5LowercaseDigest.java",
+      "java": "package com.example.security;\n\nimport java.security.MessageDigest;\nimport java.security.NoSuchAlgorithmException;\nimport java.nio.charset.StandardCharsets;\n\npublic class Md5LowercaseDigest {\n    public String fingerprint(String input) throws NoSuchAlgorithmException {\n        MessageDigest md = MessageDigest.getInstance(\"md5\");\n        byte[] out = md.digest(input.getBytes(StandardCharsets.UTF_8));\n        StringBuilder sb = new StringBuilder();\n        for (byte b : out) {\n            sb.append(String.format(\"%02x\", b));\n        }\n        return sb.toString();\n    }\n}",
+      "expect": "known-gap",
+      "rule_id": "JSEC-HASH",
+      "rationale": "MD5 is genuinely weak, but the literal is lowercase 'md5'; if the rule matches the exact strings \"MD5\"/\"SHA-1\" case-sensitively it misses this common casing variant, so it is a genuine false negative beyond the documented model."
+    },
+    {
+      "filename": "Sha1UppercaseDigest.java",
+      "java": "package com.example.security;\n\nimport java.security.MessageDigest;\nimport java.security.NoSuchAlgorithmException;\n\npublic class Sha1UppercaseDigest {\n    public byte[] checksum(byte[] data) throws NoSuchAlgorithmException {\n        MessageDigest digest = MessageDigest.getInstance(\"SHA-1\");\n        digest.update(data);\n        return digest.digest();\n    }\n}",
+      "expect": "detect",
+      "rule_id": "JSEC-HASH",
+      "rationale": "Canonical weak-hash usage with the exact documented literal \"SHA-1\" passed directly to MessageDigest.getInstance, which the rule targets by design (true positive)."
+    },
+    {
+      "filename": "DesEcbCipher.java",
+      "java": "package com.example.crypto;\n\nimport javax.crypto.Cipher;\nimport javax.crypto.spec.SecretKeySpec;\nimport java.security.Key;\n\npublic class DesEcbCipher {\n    public byte[] encrypt(byte[] plaintext, byte[] keyBytes) throws Exception {\n        Key key = new SecretKeySpec(keyBytes, \"DES\");\n        Cipher cipher = Cipher.getInstance(\"DES/ECB/PKCS5Padding\");\n        cipher.init(Cipher.ENCRYPT_MODE, key);\n        return cipher.doFinal(plaintext);\n    }\n}",
+      "expect": "detect",
+      "rule_id": "JSEC-CIPHER",
+      "rationale": "Cipher.getInstance receives a string literal containing both DES and ECB, both explicitly listed as weak-cipher triggers, so a case-sensitive match on these tokens fires (true positive)."
+    },
+    {
+      "filename": "MixedCaseDesEcbCipher.java",
+      "java": "package com.example.crypto;\n\nimport javax.crypto.Cipher;\nimport javax.crypto.spec.SecretKeySpec;\nimport java.security.Key;\n\npublic class MixedCaseDesEcbCipher {\n    public byte[] encryptToken(byte[] token, byte[] rawKey) throws Exception {\n        Key key = new SecretKeySpec(rawKey, \"DES\");\n        Cipher cipher = Cipher.getInstance(\"Des/ecb/NoPadding\");\n        cipher.init(Cipher.ENCRYPT_MODE, key);\n        return cipher.doFinal(token);\n    }\n}",
+      "expect": "known-gap",
+      "rule_id": "JSEC-CIPHER",
+      "rationale": "Still weak DES-in-ECB, but the transformation string uses mixed casing 'Des/ecb'; if the rule token-matches the uppercase forms DES/ECB case-sensitively it misses this valid JCE-accepted casing, a genuine miss."
+    },
+    {
+      "filename": "InsecureRandomToken.java",
+      "java": "package com.example.token;\n\nimport java.util.Random;\n\npublic class InsecureRandomToken {\n    public String newSessionId() {\n        Random rng = new Random();\n        StringBuilder sb = new StringBuilder();\n        for (int i = 0; i < 16; i++) {\n            int c = rng.nextInt(16);\n            sb.append(Integer.toHexString(c));\n        }\n        return sb.toString();\n    }\n}",
+      "expect": "detect",
+      "rule_id": "JSEC-RANDOM",
+      "rationale": "Directly constructs new Random() and uses it to build a session identifier, matching the exact 'new java.util.Random()' trigger for security-sensitive randomness (true positive)."
+    },
+    {
+      "filename": "RandomSubclassToken.java",
+      "java": "package com.example.token;\n\nimport java.util.Random;\n\npublic class RandomSubclassToken {\n\n    static class SeededRandom extends Random {\n        SeededRandom(long seed) {\n            super(seed);\n        }\n    }\n\n    public long nextChallenge() {\n        SeededRandom rng = new SeededRandom(System.currentTimeMillis());\n        return rng.nextLong();\n    }\n}",
+      "expect": "known-gap",
+      "rule_id": "JSEC-RANDOM",
+      "rationale": "Cryptographically weak because SeededRandom extends java.util.Random, but the security-relevant constructor is 'new SeededRandom(...)', not 'new Random()'/'Math.random()'; resolving the subclass to its weak parent is beyond the constructor-name match, so it is missed."
+    },
+    {
+      "filename": "DeserializeViaHelper.java",
+      "java": "package com.example.io;\n\nimport java.io.ByteArrayInputStream;\nimport java.io.IOException;\nimport java.io.InputStream;\nimport java.io.ObjectInputStream;\n\npublic class DeserializeViaHelper {\n\n    private ObjectInputStream wrap(InputStream in) throws IOException {\n        return new ObjectInputStream(in);\n    }\n\n    public Object load(byte[] payload) throws IOException, ClassNotFoundException {\n        InputStream in = new ByteArrayInputStream(payload);\n        ObjectInputStream ois = wrap(in);\n        return ois.readObject();\n    }\n}",
+      "expect": "detect",
+      "rule_id": "JSEC-DESER",
+      "rationale": "Although the ObjectInputStream is created inside a helper method, the literal 'new ObjectInputStream(...)' node still appears in the source and the rule flags that constructor wherever it occurs, so an AST scan detects it (true positive)."
+    },
+    {
+      "filename": "XxeDomParser.java",
+      "java": "import javax.xml.parsers.DocumentBuilder;\nimport javax.xml.parsers.DocumentBuilderFactory;\nimport org.w3c.dom.Document;\nimport java.io.InputStream;\n\npublic class XxeDomParser {\n    public Document parse(InputStream xml) throws Exception {\n        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();\n        // These setters look like hardening but are NOT: none touch external entities\n        factory.setNamespaceAware(true);\n        factory.setValidating(false);\n        factory.setIgnoringComments(true);\n        factory.setCoalescing(true);\n        DocumentBuilder builder = factory.newDocumentBuilder();\n        return builder.parse(xml);\n    }\n}\n",
+      "expect": "detect",
+      "rule_id": "JSEC-XXE",
+      "rationale": "True positive: DocumentBuilderFactory.newInstance() with only setNamespaceAware/setValidating/setIgnoringComments/setCoalescing and zero setFeature/setAttribute calls, so no real XXE hardening is present."
+    },
+    {
+      "filename": "XxeSaxLoader.java",
+      "java": "import javax.xml.parsers.SAXParser;\nimport javax.xml.parsers.SAXParserFactory;\nimport org.xml.sax.helpers.DefaultHandler;\nimport java.io.File;\n\npublic class XxeSaxLoader {\n    public void load(File file) throws Exception {\n        SAXParserFactory spf = SAXParserFactory.newInstance();\n        spf.setNamespaceAware(true);\n        SAXParser parser = spf.newSAXParser();\n        parser.parse(file, new DefaultHandler());\n    }\n}\n",
+      "expect": "detect",
+      "rule_id": "JSEC-XXE",
+      "rationale": "True positive: SAXParserFactory.newInstance() with only an unrelated setNamespaceAware(true) setter and no setFeature/setAttribute hardening against external entities or DTDs."
+    },
+    {
+      "filename": "TrustAllClient.java",
+      "java": "import javax.net.ssl.SSLContext;\nimport javax.net.ssl.TrustManager;\nimport javax.net.ssl.X509TrustManager;\nimport java.security.SecureRandom;\nimport java.security.cert.X509Certificate;\n\npublic class TrustAllClient {\n    public void configure() throws Exception {\n        TrustManager[] trustAll = new TrustManager[] {\n            new X509TrustManager() {\n                public void checkClientTrusted(X509Certificate[] chain, String authType) {\n                }\n                public void checkServerTrusted(X509Certificate[] chain, String authType) {\n                }\n                public X509Certificate[] getAcceptedIssuers() {\n                    return new X509Certificate[0];\n                }\n            }\n        };\n        SSLContext sc = SSLContext.getInstance(\"TLS\");\n        sc.init(null, trustAll, new SecureRandom());\n    }\n}\n",
+      "expect": "detect",
+      "rule_id": "JSEC-TLS",
+      "rationale": "True positive: anonymous X509TrustManager whose checkClientTrusted and checkServerTrusted bodies are empty, disabling certificate validation exactly as the rule describes."
+    },
+    {
+      "filename": "LaxHostnameVerifier.java",
+      "java": "import javax.net.ssl.HostnameVerifier;\nimport javax.net.ssl.SSLSession;\nimport javax.net.ssl.HttpsURLConnection;\n\npublic class LaxHostnameVerifier {\n    public void install() {\n        HostnameVerifier verifier = new HostnameVerifier() {\n            public boolean verify(String hostname, SSLSession session) {\n                if (hostname != null && hostname.length() >= 0) {\n                    return true;\n                } else {\n                    return true;\n                }\n            }\n        };\n        HttpsURLConnection.setDefaultHostnameVerifier(verifier);\n    }\n}\n",
+      "expect": "known-gap",
+      "rule_id": "JSEC-TLS",
+      "rationale": "Genuine miss: verify() always yields true but through an if/else with both branches returning true, so a pattern keyed on an unconditional single 'return true;' body will not fire."
+    },
+    {
+      "filename": "SessionCookieWriter.java",
+      "java": "import javax.servlet.http.Cookie;\nimport javax.servlet.http.HttpServletResponse;\n\npublic class SessionCookieWriter {\n    public void write(HttpServletResponse response, String sessionId) {\n        Cookie cookie = new Cookie(\"SESSIONID\", sessionId);\n        cookie.setPath(\"/\");\n        cookie.setMaxAge(3600);\n        cookie.setSecure(false);\n        cookie.setHttpOnly(false);\n        response.addCookie(cookie);\n    }\n}\n",
+      "expect": "detect",
+      "rule_id": "JSEC-COOKIE",
+      "rationale": "True positive: explicit setSecure(false) and setHttpOnly(false) on a session cookie are the literal insecure-flag patterns the rule catches."
+    },
+    {
+      "filename": "DatabaseConfig.java",
+      "java": "public class DatabaseConfig {\n    private String password = \"P@ssw0rd_prod_2026\";\n    private String awsAccessKey = \"AKIAIOSFODNN7EXAMPLE\";\n    private String dbUrl = \"jdbc:mysql://db.internal:3306/app?user=svc&password=hunter2\";\n\n    public String getPassword() {\n        return password;\n    }\n}\n",
+      "expect": "detect",
+      "rule_id": "JSEC-SECRET",
+      "rationale": "True positive: a field literally named 'password' assigned a string literal, plus an AWS-access-key-format literal (AKIA...) and a JDBC connection string embedding a password, all match the rule."
+    },
+    {
+      "filename": "IntegrationTokens.java",
+      "java": "public class IntegrationTokens {\n    private static final String slackBotToken = \"xoxb-EXAMPLE-PLACEHOLDER-not-a-real-slack-token\";\n    private String googleMapsApiKey = \"AIzaSyD9aBcDeFgHiJkLmNoPqRsTuVwXyZ012345\";\n    private String serviceSecret = \"s3rv1c3_sh4r3d_s3cr3t\";\n\n    public String authHeader() {\n        return \"Bearer \" + serviceSecret;\n    }\n}\n",
+      "expect": "detect",
+      "rule_id": "JSEC-SECRET",
+      "rationale": "True positive: a Slack token literal (xoxb-...), a Google API key literal (AIza...), and suspiciously-named fields (apiKey/secret) each independently trigger the hardcoded-secret rule."
+    },
+    {
+      "filename": "PreparedStatementBind.java",
+      "java": "import java.sql.Connection;\nimport java.sql.PreparedStatement;\nimport java.sql.ResultSet;\nimport javax.servlet.http.HttpServletRequest;\n\npublic class PreparedStatementBind {\n    public ResultSet findUser(Connection conn, HttpServletRequest req) throws Exception {\n        String id = req.getParameter(\"id\");\n        String sql = \"SELECT id, name, email FROM users WHERE id = ?\";\n        PreparedStatement ps = conn.prepareStatement(sql);\n        ps.setString(1, id);\n        return ps.executeQuery();\n    }\n}\n",
+      "expect": "clean",
+      "rule_id": "",
+      "rationale": "prepareStatement receives a constant literal and the tainted id reaches the DB only through a setString bind parameter, never the query text."
+    },
+    {
+      "filename": "ConstantSqlQuery.java",
+      "java": "import java.sql.Connection;\nimport java.sql.ResultSet;\nimport java.sql.Statement;\n\npublic class ConstantSqlQuery {\n    public int countOrders(Connection conn) throws Exception {\n        Statement stmt = conn.createStatement();\n        ResultSet rs = stmt.executeQuery(\"SELECT COUNT(*) FROM orders WHERE status = 'OPEN'\");\n        rs.next();\n        return rs.getInt(1);\n    }\n}\n",
+      "expect": "clean",
+      "rule_id": "",
+      "rationale": "executeQuery receives a fully constant string literal with no taint source anywhere in the method."
+    },
+    {
+      "filename": "AllowlistBranchQuery.java",
+      "java": "import java.sql.Connection;\nimport java.sql.ResultSet;\nimport java.sql.Statement;\nimport javax.servlet.http.HttpServletRequest;\n\npublic class AllowlistBranchQuery {\n    public ResultSet listProducts(Connection conn, HttpServletRequest req) throws Exception {\n        String dir = req.getParameter(\"dir\");\n        String sql;\n        if (\"desc\".equalsIgnoreCase(dir)) {\n            sql = \"SELECT id, name FROM products ORDER BY name DESC\";\n        } else {\n            sql = \"SELECT id, name FROM products ORDER BY name ASC\";\n        }\n        Statement stmt = conn.createStatement();\n        return stmt.executeQuery(sql);\n    }\n}\n",
+      "expect": "clean",
+      "rule_id": "",
+      "rationale": "The tainted dir only drives a branch comparison; sql is assigned exclusively constant literals, so executeQuery never receives tainted data."
+    },
+    {
+      "filename": "ParseIntSanitizedQuery.java",
+      "java": "import java.sql.Connection;\nimport java.sql.ResultSet;\nimport java.sql.Statement;\nimport javax.servlet.http.HttpServletRequest;\n\npublic class ParseIntSanitizedQuery {\n    public ResultSet getAccount(Connection conn, HttpServletRequest req) throws Exception {\n        int accountId = Integer.parseInt(req.getParameter(\"acct\"));\n        Statement stmt = conn.createStatement();\n        return stmt.executeQuery(\"SELECT balance FROM accounts WHERE id = \" + accountId);\n    }\n}\n",
+      "expect": "clean",
+      "rule_id": "",
+      "rationale": "Integer.parseInt is a listed sanitizer, so the concatenated accountId is untainted before reaching executeQuery."
+    },
+    {
+      "filename": "EsapiEncodedQuery.java",
+      "java": "import java.sql.Connection;\nimport java.sql.ResultSet;\nimport java.sql.Statement;\nimport javax.servlet.http.HttpServletRequest;\nimport org.owasp.esapi.ESAPI;\nimport org.owasp.esapi.codecs.OracleCodec;\n\npublic class EsapiEncodedQuery {\n    public ResultSet findByName(Connection conn, HttpServletRequest req) throws Exception {\n        String raw = req.getParameter(\"name\");\n        String safe = ESAPI.encoder().encodeForSQL(new OracleCodec(), raw);\n        Statement stmt = conn.createStatement();\n        return stmt.executeQuery(\"SELECT id FROM users WHERE name = '\" + safe + \"'\");\n    }\n}\n",
+      "expect": "clean",
+      "rule_id": "",
+      "rationale": "ESAPI encodeForSQL is a listed encodeForX sanitizer, so the concatenated value is untainted when it reaches executeQuery."
+    },
+    {
+      "filename": "HibernateBindQuery.java",
+      "java": "import org.hibernate.Session;\nimport org.hibernate.query.Query;\nimport javax.servlet.http.HttpServletRequest;\n\npublic class HibernateBindQuery {\n    public Object findUser(Session session, HttpServletRequest req) {\n        String email = req.getParameter(\"email\");\n        Query query = session.createQuery(\"FROM User u WHERE u.email = :email\");\n        query.setParameter(\"email\", email);\n        return query.uniqueResult();\n    }\n}\n",
+      "expect": "clean",
+      "rule_id": "",
+      "rationale": "createQuery receives a constant HQL literal and the tainted email is supplied only via a named setParameter bind, never concatenated into the query."
+    },
+    {
+      "filename": "MapAllowlistQuery.java",
+      "java": "import java.sql.Connection;\nimport java.sql.ResultSet;\nimport java.sql.Statement;\nimport java.util.HashMap;\nimport java.util.Map;\nimport javax.servlet.http.HttpServletRequest;\n\npublic class MapAllowlistQuery {\n    private static final Map<String, String> QUERIES = new HashMap<String, String>();\n    static {\n        QUERIES.put(\"name\", \"SELECT id FROM users ORDER BY name\");\n        QUERIES.put(\"date\", \"SELECT id FROM users ORDER BY created_at\");\n    }\n\n    public ResultSet listUsers(Connection conn, HttpServletRequest req) throws Exception {\n        String key = req.getParameter(\"sort\");\n        String sql = QUERIES.get(key);\n        if (sql == null) {\n            sql = \"SELECT id FROM users\";\n        }\n        Statement stmt = conn.createStatement();\n        return stmt.executeQuery(sql);\n    }\n}\n",
+      "expect": "clean",
+      "rule_id": "",
+      "rationale": "The tainted key is only a map lookup argument (taint through maps is not propagated) and every value returned is a constant literal, so sql is untainted."
+    },
+    {
+      "filename": "OrderRepository.java",
+      "java": "public class OrderRepository {\n    private final java.util.Map<String, String> cache = new java.util.HashMap<>();\n\n    public String executeQuery(String key) {\n        return cache.get(key);\n    }\n\n    public String findName(String key) {\n        return executeQuery(key);\n    }\n}\n",
+      "expect": "clean",
+      "rule_id": "",
+      "rationale": "executeQuery is a method on a plain Map-backed repository, not java.sql.Statement, and no SQL string ever reaches a query sink, so JSEC-SQLI must not fire on the name alone."
+    },
+    {
+      "filename": "DigestUtil.java",
+      "java": "import java.security.MessageDigest;\nimport java.security.NoSuchAlgorithmException;\n\npublic class DigestUtil {\n    // Legacy note: this used MessageDigest.getInstance(\"MD5\") and once ran\n    // Runtime.getRuntime().exec(\"checksum\"); both were removed in 2021.\n    public byte[] hash(byte[] data) throws NoSuchAlgorithmException {\n        MessageDigest digest = MessageDigest.getInstance(\"SHA-256\");\n        return digest.digest(data);\n    }\n}\n",
+      "expect": "clean",
+      "rule_id": "",
+      "rationale": "The only executable getInstance call uses SHA-256 (not MD5/SHA-1) and the MD5/exec strings appear solely inside a comment, so JSEC-HASH and JSEC-CMDI have no real sink."
+    },
+    {
+      "filename": "Encryptor.java",
+      "java": "import javax.crypto.Cipher;\nimport javax.crypto.spec.GCMParameterSpec;\nimport javax.crypto.spec.SecretKeySpec;\nimport java.security.SecureRandom;\n\npublic class Encryptor {\n    public byte[] encrypt(byte[] key, byte[] plaintext) throws Exception {\n        SecureRandom random = new SecureRandom();\n        byte[] iv = new byte[12];\n        random.nextBytes(iv);\n        Cipher cipher = Cipher.getInstance(\"AES/GCM/NoPadding\");\n        SecretKeySpec keySpec = new SecretKeySpec(key, \"AES\");\n        GCMParameterSpec spec = new GCMParameterSpec(128, iv);\n        cipher.init(Cipher.ENCRYPT_MODE, keySpec, spec);\n        return cipher.doFinal(plaintext);\n    }\n}\n",
+      "expect": "clean",
+      "rule_id": "",
+      "rationale": "Cipher.getInstance uses authenticated AES/GCM (no DES/3DES/RC4/Blowfish/ECB) and randomness comes from SecureRandom rather than java.util.Random or Math.random, so JSEC-CIPHER and JSEC-RANDOM stay clean."
+    },
+    {
+      "filename": "SafeXmlParser.java",
+      "java": "import javax.xml.parsers.DocumentBuilderFactory;\nimport javax.xml.parsers.DocumentBuilder;\nimport org.w3c.dom.Document;\nimport java.io.File;\n\npublic class SafeXmlParser {\n    public Document parse(File file) throws Exception {\n        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();\n        factory.setFeature(\"http://apache.org/xml/features/disallow-doctype-decl\", true);\n        factory.setFeature(\"http://xml.org/sax/features/external-general-entities\", false);\n        factory.setFeature(\"http://xml.org/sax/features/external-parameter-entities\", false);\n        factory.setXIncludeAware(false);\n        factory.setExpandEntityReferences(false);\n        DocumentBuilder builder = factory.newDocumentBuilder();\n        return builder.parse(file);\n    }\n}\n",
+      "expect": "clean",
+      "rule_id": "",
+      "rationale": "The factory .newInstance() is immediately hardened with disallow-doctype-decl and external-entity setFeature calls, which is exactly the condition that suppresses JSEC-XXE."
+    },
+    {
+      "filename": "SessionCookieFactory.java",
+      "java": "import javax.servlet.http.Cookie;\nimport javax.servlet.http.HttpServletResponse;\n\npublic class SessionCookieFactory {\n    public void addSessionCookie(HttpServletResponse response, String sessionId) {\n        Cookie cookie = new Cookie(\"SESSIONID\", sessionId);\n        cookie.setSecure(true);\n        cookie.setHttpOnly(true);\n        cookie.setPath(\"/\");\n        response.addCookie(cookie);\n    }\n}\n",
+      "expect": "clean",
+      "rule_id": "",
+      "rationale": "Both cookie flags are set to true (setSecure(true)/setHttpOnly(true)), which is the secure configuration and the inverse of the false-argument pattern JSEC-COOKIE flags."
+    },
+    {
+      "filename": "ConfigLoader.java",
+      "java": "import java.io.File;\nimport java.io.FileInputStream;\nimport java.io.IOException;\nimport java.util.Properties;\n\npublic class ConfigLoader {\n    private static final String CONFIG_PATH = \"/etc/myapp/config.properties\";\n\n    public Properties load() throws IOException {\n        Properties props = new Properties();\n        File file = new File(CONFIG_PATH);\n        try (FileInputStream in = new FileInputStream(file)) {\n            props.load(in);\n        }\n        return props;\n    }\n}\n",
+      "expect": "clean",
+      "rule_id": "",
+      "rationale": "The File/FileInputStream argument derives from a hardcoded constant path with no request/env/args source, and JSEC-PATH requires taint (not a mere file API), so nothing fires."
+    },
+    {
+      "filename": "BackupRunner.java",
+      "java": "import java.io.IOException;\n\npublic class BackupRunner {\n    public Process runBackup() throws IOException {\n        ProcessBuilder builder = new ProcessBuilder(\"/usr/bin/rsync\", \"-a\", \"/data\", \"/backup\");\n        builder.redirectErrorStream(true);\n        return builder.start();\n    }\n}\n",
+      "expect": "clean",
+      "rule_id": "",
+      "rationale": "ProcessBuilder is constructed from a fixed literal argument list with no attacker-controlled input reaching command(), so JSEC-CMDI has no tainted flow to report."
+    },
+    {
+      "filename": "BuilderChainSqli.java",
+      "java": "import java.sql.Connection;\nimport java.sql.Statement;\nimport javax.servlet.http.HttpServletRequest;\n\npublic class BuilderChainSqli {\n    public void run(Connection conn, HttpServletRequest req) throws Exception {\n        StringBuilder sb = new StringBuilder();\n        String q = sb.append(\"SELECT id FROM t WHERE id=\").append(req.getParameter(\"id\")).toString();\n        Statement stmt = conn.createStatement();\n        stmt.executeQuery(q);\n    }\n}\n",
+      "expect": "detect",
+      "rule_id": "JSEC-SQLI",
+      "rationale": "Engine-review repro: taint flows through a variable-rooted StringBuilder selector chain sb.append(...).append(source).toString()."
+    }
+  ]
+}

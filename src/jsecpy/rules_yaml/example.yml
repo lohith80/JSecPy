@@ -1,0 +1,34 @@
+# Example user-defined rules. Copy this file, edit, and pass the directory with
+# --rules path/to/dir  (or set yaml_rule_paths in .jsecpy.yml).
+#
+# Each rule matches a dangerous method invocation ("sink"). Use member:Type to
+# require a receiver type; add require_taint to only flag attacker-controlled
+# arguments.
+rules:
+  - id: JSEC-Y-EXPRLANG
+    name: Expression Language Injection (SpEL)
+    severity: HIGH
+    confidence: MEDIUM
+    cwe: [CWE-917]
+    owasp: "A03:2021-Injection"
+    remediation: >
+      Do not evaluate user input as a SpEL/OGNL expression. Parse expected
+      values explicitly instead of using an expression evaluator.
+    sinks:
+      - parseExpression:ExpressionParser
+      - getValue:Expression
+    require_taint: true
+    references: ["https://cwe.mitre.org/data/definitions/917.html"]
+
+  - id: JSEC-Y-SCRIPTENGINE
+    name: Script Engine Injection
+    severity: CRITICAL
+    confidence: MEDIUM
+    cwe: [CWE-94]
+    owasp: "A03:2021-Injection"
+    remediation: >
+      Never eval() attacker-controlled script text. Remove the scripting bridge
+      or restrict it to a sandbox with no host access.
+    sinks:
+      - eval:ScriptEngine
+    require_taint: true

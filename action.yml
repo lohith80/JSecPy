@@ -1,0 +1,58 @@
+name: "JSecPy Java SAST"
+description: "Scan Java source for security vulnerabilities (AST + taint analysis, CWE/OWASP-mapped) and upload SARIF to GitHub code scanning."
+branding:
+  icon: "shield"
+  color: "purple"
+inputs:
+  paths:
+    description: "Space-separated files or directories to scan."
+    required: false
+    default: "."
+  fail-on:
+    description: "Fail the job if any finding is at or above this severity (INFO|LOW|MEDIUM|HIGH|CRITICAL)."
+    required: false
+    default: "HIGH"
+  min-severity:
+    description: "Only report findings at or above this severity."
+    required: false
+    default: "LOW"
+  output:
+    description: "Path to write the SARIF report."
+    required: false
+    default: "jsecpy.sarif"
+  config:
+    description: "Path to a .jsecpy.yml config file (optional)."
+    required: false
+    default: ""
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - name: Install JSecPy
+      shell: bash
+      run: pip install "jsecpy @ git+https://github.com/lohith80/JSecPy@v2.0.0"
+    - name: Run JSecPy (SARIF)
+      shell: bash
+      run: |
+        CONFIG_ARG=""
+        if [ -n "${{ inputs.config }}" ]; then CONFIG_ARG="--config ${{ inputs.config }}"; fi
+        jsecpy ${{ inputs.paths }} \
+          --format sarif --output "${{ inputs.output }}" \
+          --min-severity "${{ inputs.min-severity }}" \
+          --fail-on "${{ inputs.fail-on }}" \
+          --no-banner $CONFIG_ARG || echo "JSECPY_EXIT=$?" >> "$GITHUB_ENV"
+    - name: Upload SARIF to code scanning
+      if: always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: "${{ inputs.output }}"
+    - name: Enforce failure threshold
+      shell: bash
+      run: |
+        if [ "${JSECPY_EXIT:-0}" != "0" ]; then
+          echo "JSecPy found findings at or above the fail-on threshold."
+          exit 1
+        fi

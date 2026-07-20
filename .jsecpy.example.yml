@@ -1,0 +1,25 @@
+# Copy to .jsecpy.yml and pass with --config .jsecpy.yml
+# All keys are optional; shown values are the defaults.
+
+min_severity: LOW          # report findings at or above this (INFO|LOW|MEDIUM|HIGH|CRITICAL)
+fail_on: HIGH              # exit non-zero if any finding is at or above this
+
+# Glob patterns (POSIX) excluded from scanning.
+excludes:
+  - "**/target/**"
+  - "**/build/**"
+  - "**/generated/**"
+  - "**/*Test.java"
+  - "**/test/**"
+
+# Turn specific rules off, or restrict to an allowlist.
+disabled_rules: []         # e.g. [JSEC-COOKIE]
+# enabled_rules: [JSEC-SQLI, JSEC-CMDI]   # if set, ONLY these run
+
+# Directories or files of custom YAML rules (see docs/WRITING_RULES.md).
+yaml_rule_paths: []        # e.g. [security/jsecpy-rules.yml]
+
+# Baseline of known findings to ignore (create with --write-baseline).
+# baseline: .jsecpy-baseline.json
+
+scan_tests: false          # set true to include test files

@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# JSecPy local artifacts
+*.sarif
+jsecpy-report.json
+.jsecpy-baseline.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

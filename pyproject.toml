@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jsecpy"
+version = "2.1.0"
+description = "AST + taint-based static application security testing (SAST) for Java, mapped to CWE and the OWASP Top 10, with SARIF output for GitHub code scanning."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Indu Lohith Narisetty", email = "indulohithnarisetty@gmail.com" }]
+keywords = ["sast", "java", "security", "static-analysis", "owasp", "cwe", "sarif", "appsec", "taint-analysis"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Topic :: Security",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+]
+dependencies = [
+  "javalang>=0.13.0",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
+[project.scripts]
+jsecpy = "jsecpy.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/lohith80/JSecPy"
+Issues = "https://github.com/lohith80/JSecPy/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+jsecpy = ["rules_yaml/*.yml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+"src/jsecpy/rules/*" = ["F401"]
